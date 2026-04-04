@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start the OctoPrint Server in the background (&)
-OCTO_PATH="/Users/phoebea/OctoPrint/venv/bin/octoprint"
-GUI_DIR="/Users/phoebea//Desktop/My CSE classes/UCI/M. Eng/"
+OCTO_PATH="/home/ucei/OctoPrint/venv/bin/octoprint"
+GUI_DIR="/home/ucei/Documents/UCEI"
 
 # Activate virtual environment
 cd "$GUI_DIR"
@@ -21,4 +21,4 @@ then
 fi
 
 # launch  GUI
-python3 -u  gui
+python3 -u  sprayer_controller.py
