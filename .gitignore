@@ -1,0 +1,7 @@
+angledcrosshatch.gcode
+crosshatch.gcode
+raster.gcode
+spiral.gcode
+venv
+.venv/
+env/
