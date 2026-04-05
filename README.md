@@ -9,8 +9,13 @@ This project provides a centralized control interface for an automated robotic a
   
 2. Project Structure
        .
-    ├── deposition_control.py   # Main Python GUI and logic
-    ├── launch_project.sh       # Bash script to initialize venv and services
+   
+    ├── sprayer_controller.py   # Main Python GUI and logic
+   
+    ├── launch_gui.sh           # Bash script to initialize venv, octoprint server and install dependencies
+   
     ├── requirements.txt        # Python dependencies (requests, etc.)
+   
     ├── .gitignore              # Prevents venv and OctoPrint files from being tracked
+   
     └── README.md               # Project documentation
