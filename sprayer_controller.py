@@ -18,7 +18,7 @@ from shapely.affinity import rotate
 CANVAS_W = 500
 CANVAS_H = 500
 SPRAYER_WIDTH = 5.0   # in millimeters; CHANGE WHEN THIS IS ACTUALLY CALCULATED
-FEEDRATE = 1800
+FEEDRATE = 1300
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -31,7 +31,8 @@ MILLIMETERS = "mm"
 INCHES = "in"
 path_file = ""
 shape_to_draw = None
-ARDUINO_PORT = '/dev/cu.usbmodem11301' # woodpecker arduino - initial prototype
+ARDUINO_PORT = '/dev/ttyACM0'
+# ARDUINO_PORT = '/dev/cu.usbmodem11301' # woodpecker arduino - initial prototype
 OCTOPRINT_PORT = 5001
 OCTOPRINT_URL = f"http://127.0.0.1:{OCTOPRINT_PORT}/"
 API_KEY = "r2W1qV4ZPIbhz9h5-Oj2syPf_bktfvAgTiDMi8kwgQ4"
@@ -79,56 +80,58 @@ def spiral_paths(poly, spacing):
 
 #     return paths
 
-def raster_paths(poly, spacing, overrun=1.0):
+def raster_paths(poly, spacing, overrun=5.0):
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
+    numofpasses = 2
+    while numofpasses > 0:
+        print("passed through here")
+        for y in np.arange(miny, maxy, spacing):
+            line = LineString([(minx, y), (maxx, y)])
+            clipped = line.intersection(poly)
 
-    for y in np.arange(miny, maxy, spacing):
-        line = LineString([(minx, y), (maxx, y)])
-        clipped = line.intersection(poly)
-
-        if clipped.is_empty:
-            continue
-
-        segments = []
-        if clipped.geom_type == "MultiLineString":
-            segments = list(clipped)
-        else:
-            segments = [clipped]
-
-        for seg in segments:
-            coords = list(seg.coords)
-            if len(coords) < 2:
+            if clipped.is_empty:
                 continue
 
-            if direction < 0:
-                coords = coords[::-1]
+            segments = []
+            if clipped.geom_type == "MultiLineString":
+                segments = list(clipped)
+            else:
+                segments = [clipped]
 
-            # ---- EXTEND SEGMENT ----
-            x1, y1 = coords[0]
-            x2, y2 = coords[-1]
+            for seg in segments:
+                coords = list(seg.coords)
+                if len(coords) < 2:
+                    continue
 
-            dx = x2 - x1
-            dy = y2 - y1
-            length = np.hypot(dx, dy)
+                if direction < 0:
+                    coords = coords[::-1]
 
-            if length == 0:
-                continue
+                # ---- EXTEND SEGMENT ----
+                x1, y1 = coords[0]
+                x2, y2 = coords[-1]
 
-            ux = dx / length
-            uy = dy / length
+                dx = x2 - x1
+                dy = y2 - y1
+                length = np.hypot(dx, dy)
 
-            # extend both ends
-            x1_ext = x1 - ux * overrun
-            y1_ext = y1 - uy * overrun
-            x2_ext = x2 + ux * overrun
-            y2_ext = y2 + uy * overrun
+                if length == 0:
+                    continue
 
-            paths.append([(x1_ext, y1_ext), (x2_ext, y2_ext)])
+                ux = dx / length
+                uy = dy / length
 
-        direction *= -1
+                # extend both ends
+                x1_ext = x1 - ux * overrun
+                y1_ext = y1 - uy * overrun
+                x2_ext = x2 + ux * overrun
+                y2_ext = y2 + uy * overrun
 
+                paths.append([(x1_ext, y1_ext), (x2_ext, y2_ext)])
+
+            direction *= -1
+        numofpasses = numofpasses - 1
     return paths
 
 
@@ -182,15 +185,18 @@ def metric_to_mm_converter(value, metric): # converts metric to mm
 # G-CODE WRITER
 # =========================
 def write_gcode(filename, paths):
+    global new_angle
+    servo_angle = new_angle
     with open(filename, "w") as f:
 
         f.write("G21\n")      # mm
+        f.write("G92 X0 Y0 Z0")
         f.write("G90\n")      # absolute
         f.write("G0 Z5\n")    # safe height
         f.write(f"G0 X0 Y0\n") 
         # f.write("G28\n")          # Home all axes
 
-        f.write("G1 Z0\n")    # safe height
+        f.write("G0 Z0\n")    # safe height
 
         # Optional: wait for heater
         # f.write("M104 S60\n")    # Set temp (example)
@@ -204,30 +210,35 @@ def write_gcode(filename, paths):
             f.write(f"G0 X{x0:.2f} Y{y0:.2f}\n")
 
             # Spray ON
-            # f.write("M280 P0 S70\n")
-            # f.write("G4 P250\n")  #Dwell 250ms for servo to move
+            f.write("M280 P0 S0\n")
+            f.write("G4 P250\n")  #Dwell 250ms for servo to move
             
             for x, y in path:
                 E+=1
                 f.write(f"G1 X{x:.2f} Y{y:.2f} E{E} F{FEEDRATE}\n")
 
             # Spray OFF
-            # f.write("M280 P0 S90\n")
-            # f.write("G4 P250\n")  #Dwell 250ms for servo to move
+            f.write(f"M280 P0 S{servo_angle}\n")
+            f.write("G4 P250\n")  #Dwell 250ms for servo to move
+            
+        f.write("M280 P0 S0\n")
+        f.write("G4 P250\n")  #Dwell 250ms for servo to move
 
         # ===== Shutdown =====
-        f.write("G0 Z5\n")
+        # f.write("G0 Z5\n")
         # Return to origin
         f.write("G0 X0 Y0\n")
 
 def move_servo():  #updated marlin function
     global ser
+    global new_angle
     angle = servoDegreetb.get()
-    if angle == "" or not isinstance(angle, int):  # no input / incorrect value
+    if angle == "" or not isinstance(int(angle), int):  # no input / incorrect value
         logger.warning("Please input a valid integer")
+        new_angle = 0
         return
-    elif int(angle) >= 0 and int(angle) <= 30: #valid angle set
-        new_angle = 90 - int(angle)
+    elif int(angle) >= 0 and int(angle) <= 270: #valid angle set
+        new_angle = int(angle)
         logger.info(f"New angle = {new_angle}")
         
         headers = {
@@ -251,6 +262,8 @@ def move_servo():  #updated marlin function
         #     response = ser.readline().decode('utf-8').strip()
         #     print(f"Arduino says: {response}")
     else:  # if angle specified is too high or low / invalid input, pass 
+        new_angle = 0
+        logger.warning("Inputted integer outside of bounds. Select an angle between 0 & 270")
         return
     return
 
@@ -493,7 +506,8 @@ def path_clicked(event): #executed when path from listbox is selected
 def background_setup(): # connects to arduino and connects printer to octoprint
     # OPEN arduino connection once at the start
     try:
-        ser = serial.Serial(ARDUINO_PORT, 115200)
+        ser = serial.Serial(ARDUINO_PORT, 250000)
+        logger.info("Successfully  connected to Servo")
         time.sleep(2) # Wait for the reboot
     except:
         logger.error("Could not connect to arduino. Check the port name!")
@@ -532,7 +546,8 @@ def on_closing():
     except:
         print("Serial is not connected, nothing to close\n")
     # root.destroy()
-    generate_button.config(state="disabled")
+    # generate_button.config(state="disabled")
+    
 
 def finish(): # Runs when the finish shape button is clicked
     global path_file
@@ -543,22 +558,6 @@ def finish(): # Runs when the finish shape button is clicked
     open_in_octoprint(f"/home/ucei/Documents/UCEI/{path_file}")
     on_closing()
 
-def moveServo():   #DELETE WHEN NO LONGER NEEDED
-    global ser
-    angle = servoDegreetb.get()
-    if angle == "":  # no input
-        print("nothing here")
-        pass
-    elif int(angle) >= 0 and int(angle) <= 30: #valid angle set
-        new_angle = 90 - int(angle)
-        print(new_angle)
-        ser.write(f"{new_angle}\n".encode())
-        if ser.in_waiting > 0:
-            response = ser.readline().decode('utf-8').strip()
-            print(f"Arduino says: {response}")
-    else:  # if angle specified is too high or low / invalid input, pass 
-        pass
-    return
 
 
 
