@@ -25,6 +25,7 @@ SPIRAL = "Spiral"
 ZIGZAG = "ZigZag"
 CROSSHATCH = "Cross-Hatch"
 ANGLED = "Angled Cross-Hatch"
+ISOTROPIC = "Isotropic"
 CIRCLE = "Circle"
 CENTIMETERS = "cm"
 MILLIMETERS = "mm"
@@ -134,6 +135,26 @@ def raster_paths(poly, spacing, overrun=5.0):
         numofpasses = numofpasses - 1
     return paths
 
+def isotropic_paths(poly, spacing):
+    """
+    Combines Standard (0, 90) and Angled (45, 135) for 
+    maximum coating uniformity.
+    """
+    all_paths = []
+    # This combines both sets of angles into one list of G-code paths
+    for angle in [0, 90, 45, 135]:
+        rot = rotate(poly, angle, origin='centroid')
+        raster = raster_paths(rot, spacing)
+
+        for path in raster:
+            restored = []
+            for x, y in path:
+                p = rotate(Point(x, y), -angle, origin=poly.centroid)
+                restored.append(p.coords[0])
+            if len(restored) >= 2:
+                all_paths.append(restored)
+                
+    return all_paths
 
 def crosshatch_paths(poly, spacing):
     all_paths = []
@@ -257,49 +278,45 @@ def move_servo():  #updated marlin function
         except Exception as e:
             logger.error(f"Failed to connect to OctoPrint / move servo: {e}")
 
-        # ser.write(f"{new_angle}\n".encode())
-        # if ser.in_waiting > 0:
-        #     response = ser.readline().decode('utf-8').strip()
-        #     print(f"Arduino says: {response}")
     else:  # if angle specified is too high or low / invalid input, pass 
         new_angle = 0
         logger.warning("Inputted integer outside of bounds. Select an angle between 0 & 270")
         return
     return
 
-def heat_bed():  #updated marlin function
-    global ser
-    global new_temp
-    temp =  # get the desired temp
-    if temp == "" or not isinstance(int(temp), int):  # no input / incorrect value
-        logger.warning("Please input a valid integer")
-        new_temp = 0
-        return
-    elif int(temp) >= 0 and int(temp) <= 100: #valid temp set
-        new_temp = int(temp)
-        logger.info(f"New temperature = {new_temp}")
+# def heat_bed():  #updated marlin function
+#     global ser
+#     global new_temp
+#     temp =  # get the desired temp
+#     if temp == "" or not isinstance(int(temp), int):  # no input / incorrect value
+#         logger.warning("Please input a valid integer")
+#         new_temp = 0
+#         return
+#     elif int(temp) >= 0 and int(temp) <= 100: #valid temp set
+#         new_temp = int(temp)
+#         logger.info(f"New temperature = {new_temp}")
         
-        headers = {
-            "X-Api-Key": API_KEY,
-            "Content-Type": "application/json"
-        }
+#         headers = {
+#             "X-Api-Key": API_KEY,
+#             "Content-Type": "application/json"
+#         }
 
-        payload = {"command": f"M140 S{new_temp}"}
+#         payload = {"command": f"M140 S{new_temp}"}
 
-        try:
-            response = requests.post(f"{OCTOPRINT_URL}api/printer/command", headers=headers, json=payload)
-            if response.status_code == 204:
-                logger.info("Successfully sent servo the temperature command to OctoPrint!")
-            else:
-                logger.error(f"Error: {response.status_code} - {response.text}")
-        except Exception as e:
-            logger.error(f"Failed to connect to OctoPrint / move servo: {e}")
+#         try:
+#             response = requests.post(f"{OCTOPRINT_URL}api/printer/command", headers=headers, json=payload)
+#             if response.status_code == 204:
+#                 logger.info("Successfully sent servo the temperature command to OctoPrint!")
+#             else:
+#                 logger.error(f"Error: {response.status_code} - {response.text}")
+#         except Exception as e:
+#             logger.error(f"Failed to connect to OctoPrint / move servo: {e}")
 
-    else:  # if temp specified is too high or low / invalid input, pass 
-        new_temp = 0
-        logger.warning("Inputted integer outside of bounds. Select a temperature between 0 & 270")
-        return
-    return
+#     else:  # if temp specified is too high or low / invalid input, pass 
+#         new_temp = 0
+#         logger.warning("Inputted integer outside of bounds. Select a temperature between 0 & 270")
+#         return
+#     return
 
 def cm_to_mm_converter(coords): # converts cm to mm
     CM_TO_MM = 10
@@ -443,8 +460,8 @@ def shape_clicked(event): #executed when shape from listbox is selected
     print(shape_original_coords)
 
     # scales the shape to fit into the gui canvas
-    scale_factor = min((CANVAS_W * 0.8) / metric_to_mm_converter(shape_width, metric), 
-                       (CANVAS_H * 0.8) / metric_to_mm_converter(shape_height, metric))
+    scale_factor = min((CANVAS_W * 0.8) / shape_width, 
+                       (CANVAS_H * 0.8) / shape_height)
     print(scale_factor)
     print((CANVAS_W * 0.8) / metric_to_mm_converter(shape_width, metric), 
                        (CANVAS_H * 0.8) / metric_to_mm_converter(shape_height, metric))
@@ -471,6 +488,7 @@ def shape_clicked(event): #executed when shape from listbox is selected
 
 def path_clicked(event): #executed when path from listbox is selected
     global path_file
+    global original_paths
     #checks that a shape is selected first
     if shape_to_draw == None:  
         mb.showwarning("Warning!!", "Please select a shape")
@@ -506,25 +524,30 @@ def path_clicked(event): #executed when path from listbox is selected
     # the paths variable is used to display the paths in gui/canvas; coordinates are offseted to position shape in the middle of the gui
     # the original paths variable is used to get accurate coordinates in Candle; coordinates start from the origin (0,0)
     if path == SPIRAL:
-        paths = spiral_paths(poly, SPRAYER_WIDTH)
+        paths = spiral_paths(poly, SPRAYER_WIDTH*10)
         original_paths = spiral_paths(original_poly, SPRAYER_WIDTH)
         path_file = "spiral.gcode"
         print("spiral path generated")
     elif path == ZIGZAG:
-        paths = raster_paths(poly, SPRAYER_WIDTH)
+        paths = raster_paths(poly, SPRAYER_WIDTH*10)
         original_paths = raster_paths(original_poly, SPRAYER_WIDTH)
         path_file = "raster.gcode"
         print("raster path generated")
     elif path == CROSSHATCH:
-        paths = crosshatch_paths(poly, SPRAYER_WIDTH)
+        paths = crosshatch_paths(poly, SPRAYER_WIDTH*10)
         original_paths = crosshatch_paths(original_poly, SPRAYER_WIDTH)
         path_file = "crosshatch.gcode"
         print("crosshatch path generated")
     elif path == ANGLED:
-        paths = angled_crosshatch_paths(poly, SPRAYER_WIDTH)
+        paths = angled_crosshatch_paths(poly, SPRAYER_WIDTH*10)
         original_paths = angled_crosshatch_paths(original_poly, SPRAYER_WIDTH)
         path_file = "angledcrosshatch.gcode"
         print("angled crosshatch path generated")
+    elif path == ISOTROPIC: 
+        paths = isotropic_paths(poly, SPRAYER_WIDTH*10)
+        original_paths = isotropic_paths(original_poly, SPRAYER_WIDTH)
+        path_file = "isotropic.gcode"
+        print("isotropic path generated")
     print(path_file)
     
     # Displays selected paths on the canvas
@@ -532,7 +555,7 @@ def path_clicked(event): #executed when path from listbox is selected
     for path in paths:
         canvas.create_line(path, fill="blue", tags="path_lines")
     # print(f"FILE PATH = {path_file}")
-    write_gcode(path_file, original_paths)
+    # write_gcode(path_file, original_paths)
 
 # =========================
 # SETUP
@@ -585,10 +608,13 @@ def on_closing():
 
 def finish(): # Runs when the finish shape button is clicked
     global path_file
+    global original_paths
     if len(path_lb.curselection()) == 0:  #checks that a shape is selected first
         mb.showwarning("Warning!!", "Please select a path")
         return
     print(path_file)
+    write_gcode(path_file, original_paths)
+    logger.info(f"{path_file} generated")
     open_in_octoprint(f"/home/ucei/Documents/UCEI/{path_file}")
     on_closing()
 
@@ -600,7 +626,7 @@ def finish(): # Runs when the finish shape button is clicked
 ###################
 
 #### SETUP #####
-background_setup()
+background_setup() #connects to arduino and octoprint server
 
 root = tk.Tk()
 root.title("Draw Substrate Boundary")
@@ -662,6 +688,7 @@ path_lb.insert(1, SPIRAL)
 path_lb.insert(2, CROSSHATCH)
 path_lb.insert(3, ZIGZAG)
 path_lb.insert(4, ANGLED)
+path_lb.insert(5, ISOTROPIC)
 path_lb.grid(row=8, column=0)
 path_lb.bind("<<ListboxSelect>>", path_clicked)
 ###### PATH SELECTION #######
