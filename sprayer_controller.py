@@ -18,7 +18,7 @@ from shapely.affinity import rotate
 CANVAS_W = 500
 CANVAS_H = 500
 SPRAYER_WIDTH = 5.0   # in millimeters; CHANGE WHEN THIS IS ACTUALLY CALCULATED
-FEEDRATE = 1300
+FEEDRATE = 1200
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -84,7 +84,7 @@ def raster_paths(poly, spacing, overrun=5.0):
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
-    numofpasses = 2
+    numofpasses = 1
     while numofpasses > 0:
         print("passed through here")
         for y in np.arange(miny, maxy, spacing):
