@@ -267,6 +267,40 @@ def move_servo():  #updated marlin function
         return
     return
 
+def heat_bed():  #updated marlin function
+    global ser
+    global new_temp
+    temp =  # get the desired temp
+    if temp == "" or not isinstance(int(temp), int):  # no input / incorrect value
+        logger.warning("Please input a valid integer")
+        new_temp = 0
+        return
+    elif int(temp) >= 0 and int(temp) <= 100: #valid temp set
+        new_temp = int(temp)
+        logger.info(f"New temperature = {new_temp}")
+        
+        headers = {
+            "X-Api-Key": API_KEY,
+            "Content-Type": "application/json"
+        }
+
+        payload = {"command": f"M140 S{new_temp}"}
+
+        try:
+            response = requests.post(f"{OCTOPRINT_URL}api/printer/command", headers=headers, json=payload)
+            if response.status_code == 204:
+                logger.info("Successfully sent servo the temperature command to OctoPrint!")
+            else:
+                logger.error(f"Error: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"Failed to connect to OctoPrint / move servo: {e}")
+
+    else:  # if temp specified is too high or low / invalid input, pass 
+        new_temp = 0
+        logger.warning("Inputted integer outside of bounds. Select a temperature between 0 & 270")
+        return
+    return
+
 def cm_to_mm_converter(coords): # converts cm to mm
     CM_TO_MM = 10
     square_mm = [(x*CM_TO_MM, y*CM_TO_MM) for x,y in coords]
