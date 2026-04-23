@@ -2,6 +2,7 @@ angledcrosshatch.gcode
 crosshatch.gcode
 raster.gcode
 spiral.gcode
+isotropic.gcode
 venv
 .venv/
 env/
