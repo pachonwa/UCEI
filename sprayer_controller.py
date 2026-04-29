@@ -17,7 +17,7 @@ from shapely.affinity import rotate, translate
 # =========================
 CANVAS_W = 500
 CANVAS_H = 500
-SPRAYER_WIDTH = 2.5   # in millimeters; CHANGE WHEN THIS IS ACTUALLY CALCULATED
+SPRAYER_WIDTH = 2.5   # in millimeters; 2.5 is default for ucei sprayer
 FEEDRATE = 1000
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
@@ -236,10 +236,13 @@ def write_gcode(filename, paths):
     with open(filename, "w") as f:
 
         f.write("G21\n")      # mm
-        f.write("G92 X0 Y0 Z0\n")  #will be changing this to "G0 X0 Y0\n" and then the exact starting location coordinates 
         f.write("G90\n")      # absolute
         f.write("G0 Z1\n")    # moving z axes to ensure octoprint accepts gcode
-        f.write(f"G0 X0 Y0\n") 
+        f.write("G92 X0 Y0 Z0\n")  #remove once we get limit switches
+        f.write(f"G0 X140 Y100 Z0\n")
+        f.write("G92 X0 Y0 Z0\n")  #will be changing this to "G0 X0 Y0\n" and then the exact starting location coordinates 
+        #f.write("G92 X0 Y0 Z0\n")
+        #f.write(f"G0 X100 Y100\n") 
         # f.write("G28\n")          # Home all axes
 
         f.write("G0 Z0\n")    # safe height
@@ -279,6 +282,7 @@ def write_gcode(filename, paths):
         # f.write("G0 Z5\n")
         # Return to origin
         f.write("G0 X0 Y0\n")
+        f.write(f"G0 X-140 Y-100 Z0\n")
 
 def move_servo():  #updated marlin function
     global ser
@@ -463,9 +467,7 @@ def shape_clicked(event): #executed when shape from listbox is selected
 
     width = width_tb.get()
     length = length_tb.get()
-    logger.debug(f"Width input is an integer?: {is_integer(width)}, Length input is an integer?: {is_integer(length)}")
-
-    print(f"Width input is an integer?: {is_float(width)}, Length input is an integer?: {is_float(length)}")
+    logger.debug(f"Width input is a float?: {is_float(width)}, Length input is a float?: {is_float(length)}")
 
     if width == "" or length == "" or not is_float(width) or not is_float(length):
         print("Using default value of 5 x 5")
@@ -561,7 +563,7 @@ def path_clicked(event): #executed when path from listbox is selected
         r = (x_1 - x_0) / 2
         original_poly = Point(c_x, c_y).buffer(r) #used for accurate coordinates in Candle
 
-    numofpasses=3
+    numofpasses=1
     original_paths = []
 
     # generates gcode depending on selected path
