@@ -17,8 +17,8 @@ from shapely.affinity import rotate
 # =========================
 CANVAS_W = 500
 CANVAS_H = 500
-SPRAYER_WIDTH = 5.0   # in millimeters; CHANGE WHEN THIS IS ACTUALLY CALCULATED
-FEEDRATE = 1200
+SPRAYER_WIDTH = 2.5   # in millimeters; CHANGE WHEN THIS IS ACTUALLY CALCULATED
+FEEDRATE = 1000
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -81,7 +81,7 @@ def spiral_paths(poly, spacing):
 
 #     return paths
 
-def raster_paths(poly, spacing, overrun=5.0):
+def raster_paths(poly, spacing, overrun=0.0):
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
@@ -266,7 +266,11 @@ def move_servo():  #updated marlin function
             "X-Api-Key": API_KEY,
             "Content-Type": "application/json"
         }
-
+        
+        commands = [f"M280 P0 S{new_angle}","G4 S3", "M280 P0 S0"]
+        
+        #payload = {"commands": commands}
+        
         payload = {"command": f"M280 P0 S{new_angle}"}
 
         try:
@@ -360,6 +364,13 @@ def is_integer(s):
         return True
     except ValueError:
         return False
+        
+def is_float(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
 
 
 def open_in_candle(gcode_filename):
@@ -425,7 +436,9 @@ def shape_clicked(event): #executed when shape from listbox is selected
     length = length_tb.get()
     logger.debug(f"Width input is an integer?: {is_integer(width)}, Length input is an integer?: {is_integer(length)}")
 
-    if width == "" or length == "" or not is_integer(width) or not is_integer(length):
+    print(f"Width input is an integer?: {is_float(width)}, Length input is an integer?: {is_float(length)}")
+
+    if width == "" or length == "" or not is_float(width) or not is_float(length):
         print("Using default value of 5 x 5")
         width = 5
         length = 5
