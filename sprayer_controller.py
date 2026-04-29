@@ -10,7 +10,7 @@ import numpy as np
 import serial
 import time
 from shapely.geometry import Polygon, LineString, Point
-from shapely.affinity import rotate
+from shapely.affinity import rotate, translate
 
 # =========================
 # CONFIG
@@ -85,54 +85,50 @@ def raster_paths(poly, spacing, overrun=5.0):
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
-    numofpasses = 1
-    while numofpasses > 0:
-        print("passed through here")
-        for y in np.arange(miny, maxy, spacing):
-            line = LineString([(minx, y), (maxx, y)])
-            clipped = line.intersection(poly)
+    for y in np.arange(miny, maxy, spacing):
+        line = LineString([(minx, y), (maxx, y)])
+        clipped = line.intersection(poly)
 
-            if clipped.is_empty:
+        if clipped.is_empty:
+            continue
+
+        segments = []
+        if clipped.geom_type == "MultiLineString":
+            segments = list(clipped)
+        else:
+            segments = [clipped]
+
+        for seg in segments:
+            coords = list(seg.coords)
+            if len(coords) < 2:
                 continue
 
-            segments = []
-            if clipped.geom_type == "MultiLineString":
-                segments = list(clipped)
-            else:
-                segments = [clipped]
+            if direction < 0:
+                coords = coords[::-1]
 
-            for seg in segments:
-                coords = list(seg.coords)
-                if len(coords) < 2:
-                    continue
+            # ---- EXTEND SEGMENT ----
+            x1, y1 = coords[0]
+            x2, y2 = coords[-1]
 
-                if direction < 0:
-                    coords = coords[::-1]
+            dx = x2 - x1
+            dy = y2 - y1
+            length = np.hypot(dx, dy)
 
-                # ---- EXTEND SEGMENT ----
-                x1, y1 = coords[0]
-                x2, y2 = coords[-1]
+            if length == 0:
+                continue
 
-                dx = x2 - x1
-                dy = y2 - y1
-                length = np.hypot(dx, dy)
+            ux = dx / length
+            uy = dy / length
 
-                if length == 0:
-                    continue
+            # extend both ends
+            x1_ext = x1 - ux * overrun
+            y1_ext = y1 - uy * overrun
+            x2_ext = x2 + ux * overrun
+            y2_ext = y2 + uy * overrun
 
-                ux = dx / length
-                uy = dy / length
+            paths.append([(x1_ext, y1_ext), (x2_ext, y2_ext)])
 
-                # extend both ends
-                x1_ext = x1 - ux * overrun
-                y1_ext = y1 - uy * overrun
-                x2_ext = x2 + ux * overrun
-                y2_ext = y2 + uy * overrun
-
-                paths.append([(x1_ext, y1_ext), (x2_ext, y2_ext)])
-
-            direction *= -1
-        numofpasses = numofpasses - 1
+        direction *= -1
     return paths
 
 def isotropic_paths(poly, spacing):
@@ -143,17 +139,31 @@ def isotropic_paths(poly, spacing):
     all_paths = []
     # This combines both sets of angles into one list of G-code paths
     for angle in [0, 90, 45, 135]:
-        rot = rotate(poly, angle, origin='centroid')
+        # safe_poly = poly.buffer(spacing)
+        rot = rotate(poly, angle, origin='centroid')   #rotates the spray angle
+
+        #offsets the angled pattern to help reduce intersections
+        # if angle in [45, 135]:
+        #     rot = translate(rot, xoff=spacing/2, yoff=spacing/2)  
+
         raster = raster_paths(rot, spacing)
 
         for path in raster:
             restored = []
             for x, y in path:
-                p = rotate(Point(x, y), -angle, origin=poly.centroid)
-                restored.append(p.coords[0])
+                # if angle in [45, 135]:
+                #     p = translate(Point(x, y), xoff=-spacing/2, yoff=-spacing/2) #shifts offset back to 0
+                # else:
+                #     p = Point(x, y)
+
+                p_final = rotate(Point(x, y), -angle, origin=poly.centroid)
+                restored.append(p_final.coords[0])
             if len(restored) >= 2:
                 all_paths.append(restored)
-                
+        
+        #after spraying at 0 and 90 degrees, we want to wait 3o seconds before spraying angled patterns
+        if angle == 90:
+            all_paths.append("DWELL")  
     return all_paths
 
 def crosshatch_paths(poly, spacing):
@@ -206,14 +216,29 @@ def metric_to_mm_converter(value, metric): # converts metric to mm
 # G-CODE WRITER
 # =========================
 def write_gcode(filename, paths):
-    global new_angle
-    servo_angle = new_angle
+    try:
+        user_input_angle = servoDegreetb.get()
+        if not user_input_angle: # If the textbox is empty
+            servo_angle = 0
+        else:
+            if int(user_input_angle) >= 0 and int(user_input_angle) <= 270:
+                servo_angle = int(user_input_angle)
+            else:
+                servo_angle = 0
+                logger.warning("Invalid servo angle, defaulting to 0.")
+    except (ValueError, NameError):
+        # If the input isn't a number or the textbox isn't found
+        servo_angle = 0
+        logger.warning("Invalid or missing servo angle, defaulting to 0.")
+    
+    logger.info(f"Gcode file is generated with servo angle:{servo_angle}")
+
     with open(filename, "w") as f:
 
         f.write("G21\n")      # mm
-        f.write("G92 X0 Y0 Z0")
+        f.write("G92 X0 Y0 Z0\n")  #will be changing this to "G0 X0 Y0\n" and then the exact starting location coordinates 
         f.write("G90\n")      # absolute
-        f.write("G0 Z5\n")    # safe height
+        f.write("G0 Z1\n")    # moving z axes to ensure octoprint accepts gcode
         f.write(f"G0 X0 Y0\n") 
         # f.write("G28\n")          # Home all axes
 
@@ -225,12 +250,17 @@ def write_gcode(filename, paths):
 
         E=0 #needed for extrusion. octoprint is for 3d printers so if extrusion isn't mentioned, it thinks that nothing is happening
 
-        for path in paths:        
+        for path in paths:    
+            if path == "DWELL":
+                f.write("M280 P0 S0\n") # Spray OFF
+                f.write("G0 X0 Y0\n") # 1. Park the nozzle at origin to avoid heat
+                f.write("G4 S5\n")    # 2. Dwell for 5 seconds
+                continue               # 3. Move to the next pass (45 degrees)    
             x0, y0 = path[0]
 
             f.write(f"G0 X{x0:.2f} Y{y0:.2f}\n")
 
-            # Spray ON
+            # Spray OFF
             f.write("M280 P0 S0\n")
             f.write("G4 P250\n")  #Dwell 250ms for servo to move
             
@@ -238,7 +268,7 @@ def write_gcode(filename, paths):
                 E+=1
                 f.write(f"G1 X{x:.2f} Y{y:.2f} E{E} F{FEEDRATE}\n")
 
-            # Spray OFF
+            # Spray ON
             f.write(f"M280 P0 S{servo_angle}\n")
             f.write("G4 P250\n")  #Dwell 250ms for servo to move
             
@@ -252,7 +282,6 @@ def write_gcode(filename, paths):
 
 def move_servo():  #updated marlin function
     global ser
-    global new_angle
     angle = servoDegreetb.get()
     if angle == "" or not isinstance(int(angle), int):  # no input / incorrect value
         logger.warning("Please input a valid integer")
@@ -495,8 +524,8 @@ def path_clicked(event): #executed when path from listbox is selected
         return
     
     selected_path = path_lb.curselection()[0] #curselection outputs a tuple of ints; takes the first element
-    path = path_lb.get(selected_path) # gets the text associated with element
-    logger.debug(f"Selected Path: {path}")
+    path_selected = path_lb.get(selected_path) # gets the text associated with element
+    logger.debug(f"Selected Path: {path_selected}")
 
     coords = canvas.coords(shape_to_draw) #gets coordinates of the drawn shape on the canvas
     x0, y0, x1, y1 = coords
@@ -519,43 +548,73 @@ def path_clicked(event): #executed when path from listbox is selected
         r = (x_1 - x_0) / 2
         original_poly = Point(c_x, c_y).buffer(r) #used for accurate coordinates in Candle
 
+    numofpasses=3
+    original_paths = []
 
     # generates gcode depending on selected path
     # the paths variable is used to display the paths in gui/canvas; coordinates are offseted to position shape in the middle of the gui
     # the original paths variable is used to get accurate coordinates in Candle; coordinates start from the origin (0,0)
-    if path == SPIRAL:
-        paths = spiral_paths(poly, SPRAYER_WIDTH*10)
-        original_paths = spiral_paths(original_poly, SPRAYER_WIDTH)
+    if path_selected == SPIRAL:
+        base = spiral_paths(original_poly, SPRAYER_WIDTH)
+        for i in range(numofpasses):
+            original_paths.extend(base)
+
+            if i < numofpasses - 1:
+                original_paths.append("DWELL")
+        visual_path = spiral_paths(poly, SPRAYER_WIDTH*10)
+        print(original_paths)
         path_file = "spiral.gcode"
         print("spiral path generated")
-    elif path == ZIGZAG:
-        paths = raster_paths(poly, SPRAYER_WIDTH*10)
-        original_paths = raster_paths(original_poly, SPRAYER_WIDTH)
+    elif path_selected == ZIGZAG:
+        base = raster_paths(original_poly, SPRAYER_WIDTH)
+        for i in range(numofpasses):
+            original_paths.extend(base)
+
+            if i < numofpasses - 1:
+                original_paths.append("DWELL")
+        visual_path = raster_paths(poly, SPRAYER_WIDTH*10)
+        print(original_paths)
         path_file = "raster.gcode"
         print("raster path generated")
-    elif path == CROSSHATCH:
-        paths = crosshatch_paths(poly, SPRAYER_WIDTH*10)
-        original_paths = crosshatch_paths(original_poly, SPRAYER_WIDTH)
+    elif path_selected == CROSSHATCH:
+        base = crosshatch_paths(original_poly, SPRAYER_WIDTH)
+        for i in range(numofpasses):
+            original_paths.extend(base)
+
+            if i < numofpasses - 1:
+                original_paths.append("DWELL")
+        visual_path = crosshatch_paths(poly, SPRAYER_WIDTH*10)
+        print(original_paths)
         path_file = "crosshatch.gcode"
         print("crosshatch path generated")
-    elif path == ANGLED:
-        paths = angled_crosshatch_paths(poly, SPRAYER_WIDTH*10)
-        original_paths = angled_crosshatch_paths(original_poly, SPRAYER_WIDTH)
+    elif path_selected == ANGLED:
+        base = angled_crosshatch_paths(original_poly, SPRAYER_WIDTH)
+        for i in range(numofpasses):
+            original_paths.extend(base)
+
+            if i < numofpasses - 1:
+                original_paths.append("DWELL")
+        visual_path = angled_crosshatch_paths(poly, SPRAYER_WIDTH*10)
         path_file = "angledcrosshatch.gcode"
         print("angled crosshatch path generated")
-    elif path == ISOTROPIC: 
-        paths = isotropic_paths(poly, SPRAYER_WIDTH*10)
-        original_paths = isotropic_paths(original_poly, SPRAYER_WIDTH)
+    elif path_selected == ISOTROPIC: 
+        base = isotropic_paths(original_poly, SPRAYER_WIDTH)
+        for i in range(numofpasses):
+            original_paths.extend(base)
+
+            if i < numofpasses - 1:
+                original_paths.append("DWELL")
+        visual_path = isotropic_paths(poly, SPRAYER_WIDTH*10)
         path_file = "isotropic.gcode"
         print("isotropic path generated")
-    print(path_file)
     
     # Displays selected paths on the canvas
     canvas.delete("path_lines") #deletes previously traced path
-    for path in paths:
+    for path in visual_path:
+        if path == "DWELL":
+            continue
         canvas.create_line(path, fill="blue", tags="path_lines")
-    # print(f"FILE PATH = {path_file}")
-    # write_gcode(path_file, original_paths)
+
 
 # =========================
 # SETUP
@@ -590,10 +649,6 @@ def background_setup(): # connects to arduino and connects printer to octoprint
     except Exception as e:
         logger.error(f"Failed to connect to OctoPrint/printer: {e}")
 
-
-# def click(event):
-#     points.append((event.x, event.y))
-#     canvas.create_oval(event.x-7, event.y-7, event.x+7, event.y+7, fill="black")
 
 def on_closing():
     global ser
@@ -703,7 +758,6 @@ tk.Button(control_frame, text="Move servo", command=move_servo).grid(row=10, col
 generate_button = tk.Button(control_frame, text="Generate!", command=finish)
 generate_button.grid(row=11, column=0, pady=(25, 0))
 
-# canvas.bind("<Button-1>", click)
 
 root.mainloop()
 
