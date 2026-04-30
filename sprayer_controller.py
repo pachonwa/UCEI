@@ -18,7 +18,9 @@ from shapely.affinity import rotate, translate
 CANVAS_W = 500
 CANVAS_H = 500
 SPRAYER_WIDTH = 2.5   # in millimeters; 2.5 is default for ucei sprayer
+OVERRUN = 0.0   # mm past substrate edge to extend each spray pass
 FEEDRATE = 1000
+NUM_PASSES = 1   # default number of passes through the path
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -40,6 +42,18 @@ API_KEY = "r2W1qV4ZPIbhz9h5-Oj2syPf_bktfvAgTiDMi8kwgQ4"
 logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
 logger = logging.getLogger()
 
+class TextLogHandler(logging.Handler):
+    """Custom logging handler that writes log messages into a Tkinter Text widget"""
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.text_widget.config(state="normal")
+        self.text_widget.insert("end", msg + "\n")
+        self.text_widget.see("end")
+        self.text_widget.config(state="disabled")
 
 # =========================
 # PATH GENERATORS
@@ -81,7 +95,10 @@ def spiral_paths(poly, spacing):
 
 #     return paths
 
-def raster_paths(poly, spacing, overrun=0.0):
+def raster_paths(poly, spacing, overrun=None):
+    global OVERRUN
+    if overrun is None:
+        overrun = OVERRUN
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
@@ -321,6 +338,66 @@ def move_servo():  #updated marlin function
         return
     return
 
+def setNumPasses():
+    global NUM_PASSES
+    value = numPassestb.get()
+    if value == "":
+        return # if nothing entered use current NUM_PASSES
+    try:
+        n = int(value)
+        if n > 0:
+            NUM_PASSES = n
+            logger.info(f"Number of passes set to: {NUM_PASSES}")
+        else:
+            mb.showwarning("Number of passes must be a positive integer")
+    except ValueError:
+        mb.showwarning("Please enter a whole number for passes")
+
+def setSprayerWidth():
+    global SPRAYER_WIDTH
+    value = sprayerWidthtb.get()
+    if value == "":
+        return # if nothing entered use current SPRAYER_WIDTH
+    try:
+        w = float(value)
+        if w > 0:
+            SPRAYER_WIDTH = w
+            logger.info(f"Sprayer width set to: {SPRAYER_WIDTH}mm")
+        else:
+            mb.showwarning("Sprayer width must be a positive number")
+    except ValueError:
+        mb.showwarning("Please enter a valid number for sprayer width")
+
+def setOverrun():
+    global OVERRUN
+    value = overruntb.get()
+    if value == "":
+        return   # if nothing entered use current OVERRUN
+    try:
+        o = float(value)
+        if o >= 0:
+            OVERRUN = o
+            logger.info(f"Overrun set to: {OVERRUN}mm")
+        else:
+            mb.showwarning("Overrun cannot be negative")
+    except ValueError:
+        mb.showwarning("Please enter a valid number for overrun")
+
+def setFeedrate():
+    global FEEDRATE
+    value = feedratetb.get()
+    if value == "":
+        return   # if nothing entered use current FEEDRATE
+    try:
+        f = int(value)
+        if f > 0:
+            FEEDRATE = f
+            logger.info(f"Feedrate set to: {FEEDRATE} mm/min")
+        else:
+            mb.showwarning("Feedrate must be a positive integer")
+    except ValueError:
+        mb.showwarning("Please enter a whole number for feedrate")
+
 # def heat_bed():  #updated marlin function
 #     global ser
 #     global new_temp
@@ -533,6 +610,7 @@ def shape_clicked(event): #executed when shape from listbox is selected
 def path_clicked(event): #executed when path from listbox is selected
     global path_file
     global original_paths
+    global NUM_PASSES
     #checks that a shape is selected first
     if shape_to_draw == None:  
         mb.showwarning("Warning!!", "Please select a shape")
@@ -563,7 +641,7 @@ def path_clicked(event): #executed when path from listbox is selected
         r = (x_1 - x_0) / 2
         original_poly = Point(c_x, c_y).buffer(r) #used for accurate coordinates in Candle
 
-    numofpasses=1
+    numofpasses= NUM_PASSES
     original_paths = []
 
     # generates gcode depending on selected path
@@ -770,9 +848,70 @@ servoDegreetb.grid(row=9, column=0, pady=(20, 0))
 tk.Button(control_frame, text="Move servo", command=move_servo).grid(row=10, column=0)
 ###### SERVO DEGREE SELECTION #######
 
-generate_button = tk.Button(control_frame, text="Generate!", command=finish)
-generate_button.grid(row=11, column=0, pady=(25, 0))
+###### NUM PASSES SELECTION #######
+passes_label = tk.Label(control_frame, font=("Lexend", 14), text="Num. of Passes: ")
+passes_label.grid(row=11, column=0, pady=(20, 0))
 
+numPassestb = tk.Entry(control_frame, width=15)
+numPassestb.insert(0, str(NUM_PASSES))   # prefill with default
+numPassestb.grid(row=12, column=0)
+
+tk.Button(control_frame, text="Set Passes", command=setNumPasses).grid(row=13, column=0)
+###### NUM PASSES SELECTION #######
+
+###### SPRAYER WIDTH SELECTION #######
+width_input_label = tk.Label(control_frame, font=("Lexend", 14), text="Sprayer Width (mm): ")
+width_input_label.grid(row=14, column=0, pady=(20, 0))
+
+sprayerWidthtb = tk.Entry(control_frame, width=15)
+sprayerWidthtb.insert(0, str(SPRAYER_WIDTH))   # prefill with default
+sprayerWidthtb.grid(row=15, column=0)
+
+tk.Button(control_frame, text="Set Width", command=setSprayerWidth).grid(row=16, column=0)
+###### SPRAYER WIDTH SELECTION #######
+
+###### OVERRUN SELECTION #######
+overrun_label = tk.Label(control_frame, font=("Lexend", 14), text="Overrun (mm):")
+overrun_label.grid(row=17, column=0, pady=(20, 0))
+
+overruntb = tk.Entry(control_frame, width=15)
+overruntb.insert(0, str(OVERRUN))   # prefill with default
+overruntb.grid(row=18, column=0)
+
+tk.Button(control_frame, text="Set Overrun", command=setOverrun).grid(row=19, column=0)
+###### OVERRUN SELECTION #######
+
+###### FEEDRATE SELECTION #######
+feedrate_label = tk.Label(control_frame, font=("Lexend", 14), text="Feedrate (mm/min):")
+feedrate_label.grid(row=20, column=0, pady=(20, 0))
+
+feedratetb = tk.Entry(control_frame, width=15)
+feedratetb.insert(0, str(FEEDRATE))   # prefill with default
+feedratetb.grid(row=21, column=0)
+
+tk.Button(control_frame, text="Set Feedrate", command=setFeedrate).grid(row=22, column=0)
+###### FEEDRATE SELECTION #######
+
+generate_button = tk.Button(control_frame, text="Generate!", command=finish)
+generate_button.grid(row=23, column=0, pady=(25, 0))
+
+###### LOG / FEEDBACK BOX #######
+log_frame = tk.Frame(root)
+log_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+
+tk.Label(log_frame, text="Log:", font=("Lexend", 12)).pack(anchor="w")
+
+log_scrollbar = tk.Scrollbar(log_frame)
+log_scrollbar.pack(side="right", fill="y")
+
+log_box = tk.Text(log_frame, height=8, state="disabled", yscrollcommand=log_scrollbar.set)
+log_box.pack(fill="x")
+log_scrollbar.config(command=log_box.yview)
+
+gui_handler = TextLogHandler(log_box)
+gui_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+logger.addHandler(gui_handler)
+###### LOG / FEEDBACK BOX #######
 
 root.mainloop()
 
