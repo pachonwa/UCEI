@@ -17,8 +17,9 @@ from shapely.affinity import rotate, translate
 # =========================
 CANVAS_W = 500
 CANVAS_H = 500
-SPRAYER_WIDTH = 2.5   # in millimeters; 2.5 is default for ucei sprayer
-FEEDRATE = 1000
+SPRAYER_WIDTH = 5   # in millimeters; 2.5 is default for ucei sprayer
+FEEDRATE = 500
+OVERRUN = 30
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -81,15 +82,19 @@ def spiral_paths(poly, spacing):
 
 #     return paths
 
-def raster_paths(poly, spacing, overrun=0.0):
+def raster_paths(poly, spacing):
+    overrun = OVERRUN
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
     for y in np.arange(miny, maxy, spacing):
         line = LineString([(minx, y), (maxx, y)])
+        print("line string: ",line)
         clipped = line.intersection(poly)
+        print("clipped: ",clipped)
 
         if clipped.is_empty:
+            print("clip empty")
             continue
 
         segments = []
@@ -97,38 +102,101 @@ def raster_paths(poly, spacing, overrun=0.0):
             segments = list(clipped)
         else:
             segments = [clipped]
+        
+        print("segments: ",segments)
 
         for seg in segments:
             coords = list(seg.coords)
+            print("coords1: ", coords)
+            
             if len(coords) < 2:
                 continue
-
+            
             if direction < 0:
                 coords = coords[::-1]
+            
+            print("direction: ", direction)
+            print("coords: ", coords)
 
             # ---- EXTEND SEGMENT ----
             x1, y1 = coords[0]
             x2, y2 = coords[-1]
+            
+            print(x1, y1)
+            print(x2, y2)
 
             dx = x2 - x1
             dy = y2 - y1
             length = np.hypot(dx, dy)
+            
+            print("dx: ", dx)
+            print("dy: ", dy)
+            print("length: ", length)
 
             if length == 0:
                 continue
 
             ux = dx / length
             uy = dy / length
+            
+            ## TESTING
+            #x1_ext = x1 - OVERRUN      
+            #y1_ext = y1 - OVERRUN
+            #x2_ext = x2 + OVERRUN
+            #y2_ext = y2 + OVERRUN
 
             # extend both ends
-            x1_ext = x1 - ux * overrun
-            y1_ext = y1 - uy * overrun
-            x2_ext = x2 + ux * overrun
-            y2_ext = y2 + uy * overrun
+            x1_ext = x1 - (ux * overrun)      
+            y1_ext = y1 - (uy * overrun) 
+            x2_ext = x2 + (ux * overrun) 
+            y2_ext = y2 + (uy * overrun) 
+            
+            print("x1, y1_ext: ", x1_ext, y1_ext)
+            print("x2, y2_ext: ", x2_ext, y2_ext)
+            
 
             paths.append([(x1_ext, y1_ext), (x2_ext, y2_ext)])
 
         direction *= -1
+        
+        
+    # 1. Create a line exactly at the top boundary
+    top_line = LineString([(minx, maxy), (maxx, maxy)])
+    clipped_top = top_line.intersection(poly)
+
+    if not clipped_top.is_empty:
+        top_segments = [clipped_top] if clipped_top.geom_type != "MultiLineString" else list(clipped_top)
+       
+        for seg in top_segments:
+            coords = list(seg.coords)
+            if len(coords) >= 2:
+                x1, y1 = coords[0]
+                x2, y2 = coords[-1]
+               
+                # Apply the same exact vector and overrun math
+                dx = x2 - x1
+                dy = y2 - y1
+                length = np.hypot(dx, dy)
+               
+                if length > 0:
+                    ux = dx / length
+                    uy = dy / length
+                   
+                    x1_ext = x1 - ux * overrun
+                    y1_ext = y1 - uy * overrun
+                    x2_ext = x2 + ux * overrun
+                    y2_ext = y2 + uy * overrun
+                   
+                    top_path = [(x1_ext, y1_ext), (x2_ext, y2_ext)]
+                   
+                    # Respect the zigzag direction
+                    if direction < 0:
+                        top_path = top_path[::-1]
+                       
+                    paths.append(top_path)
+                   
+        direction *= -1
+        
     return paths
 
 def isotropic_paths(poly, spacing):
@@ -168,14 +236,17 @@ def isotropic_paths(poly, spacing):
 
 def crosshatch_paths(poly, spacing):
     all_paths = []
+    
+    fixed_origin = poly.centroid
+    
     for angle in [0, 90]:
-        rot = rotate(poly, angle, origin='centroid')
+        rot = rotate(poly, angle, origin=fixed_origin)
         raster = raster_paths(rot, spacing)
 
         for path in raster:
             restored = []
             for x, y in path:
-                p = rotate(Point(x, y), -angle, origin=poly.centroid)
+                p = rotate(Point(x, y), -angle, origin=fixed_origin)
                 restored.append(p.coords[0])
             if len(restored) >= 2:
                 all_paths.append(restored)
@@ -237,15 +308,23 @@ def write_gcode(filename, paths):
 
         f.write("G21\n")      # mm
         f.write("G90\n")      # absolute
-        f.write("G0 Z1\n")    # moving z axes to ensure octoprint accepts gcode
+        f.write("M211 S0\n")      # disables software endstops
         f.write("G92 X0 Y0 Z0\n")  #remove once we get limit switches
-        f.write(f"G0 X140 Y100 Z0\n")
-        f.write("G92 X0 Y0 Z0\n")  #will be changing this to "G0 X0 Y0\n" and then the exact starting location coordinates 
-        #f.write("G92 X0 Y0 Z0\n")
-        #f.write(f"G0 X100 Y100\n") 
+        #f.write("G1 Z1\n")    # moving z axes to ensure octoprint accepts gcode
+        #f.write(f"G0 X{125+OVERRUN} Y{89-OVERRUN} Z11 F{FEEDRATE}\n")
+        f.write(f"G0 X125 Y89 Z11 F{FEEDRATE}\n")
+        
+        f.write(f"G92 X0 Y0 Z0\n") 
+        #f.write(f"G0 X0 Y0\n") 
+        #f.write(f"G92 X-{OVERRUN} Y-{OVERRUN} Z0\n")
         # f.write("G28\n")          # Home all axes
-
-        f.write("G0 Z0\n")    # safe height
+        
+        #if paths and paths[0]:
+            #start_x, start_y = paths[0][0]
+            #f.write(f"G0 X{start_x:.2f} Y{start_y:.2f}\n")
+        
+        
+        #f.write("G1 Z0\n")    # safe height
 
         # Optional: wait for heater
         # f.write("M104 S60\n")    # Set temp (example)
@@ -282,7 +361,7 @@ def write_gcode(filename, paths):
         # f.write("G0 Z5\n")
         # Return to origin
         f.write("G0 X0 Y0\n")
-        f.write(f"G0 X-140 Y-100 Z0\n")
+        f.write(f"G0 X-125 Y-89 Z-11\n")
 
 def move_servo():  #updated marlin function
     global ser
