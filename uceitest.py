@@ -370,7 +370,7 @@ def metric_to_mm_converter(value, metric): # converts metric to mm
 # G-CODE WRITER
 # =========================
 def write_gcode(filename, paths):
-    x_start, y_start, z_start = [80, 98, 0]
+    x_start, y_start, z_start = [80, 98, 0]  #work home coordinates
     #checks for specified servo(needle) height
     try:
         user_input_angle = servoDegreetb.get()
