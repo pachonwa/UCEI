@@ -18,10 +18,10 @@ from shapely.affinity import rotate, translate
 # =========================
 CANVAS_W = 500
 CANVAS_H = 500
-SPRAYER_WIDTH = 5   # in millimeters; 2.5 is default for ucei sprayer
-FEEDRATE = 500
+SPRAYER_WIDTH = 2.5   # in millimeters; 2.5 is default for ucei sprayer
+FEEDRATE = 1000
 OVERRUN = 30
-BRUSH_ANGLE = 5  #in degrees
+BRUSH_ANGLE = 30  #in degrees
 RECTANGLE = "Rectangle"
 OVAL = "Oval"
 SPIRAL = "Spiral"
@@ -58,7 +58,7 @@ def spiral_paths(poly, spacing):
     return paths
 
 
-def raster_paths_xdir(poly, spacing, overrun=0.0):  #used for crosshatch
+def raster_paths_xdir(poly, spacing, overrun=10.0):  #used for crosshatch
     minx, miny, maxx, maxy = poly.bounds
     paths = []
     direction = 1
@@ -315,19 +315,19 @@ def isotropic_paths(poly, spacing):
 def crosshatch_paths(poly, spacing):
     all_paths = []
     
-    # fixed_origin = poly.centroid
+    # ~ fixed_origin = poly.centroid
     
-    # for angle in [0, 90]:
-    #     rot = rotate(poly, angle, origin=fixed_origin)
-    #     raster = raster_paths(rot, spacing)
+    # ~ for angle in [0, 90]:
+        # ~ rot = rotate(poly, angle, origin=fixed_origin)
+        # ~ raster = raster_paths(rot, spacing)
 
-    #     for path in raster:
-    #         restored = []
-    #         for x, y in path:
-    #             p = rotate(Point(x, y), -angle, origin=fixed_origin)
-    #             restored.append(p.coords[0])
-    #         if len(restored) >= 2:
-    #             all_paths.append(restored)
+        # ~ for path in raster:
+            # ~ restored = []
+            # ~ for x, y in path:
+                # ~ p = rotate(Point(x, y), -angle, origin=fixed_origin)
+                # ~ restored.append(p.coords[0])
+            # ~ if len(restored) >= 2:
+                # ~ all_paths.append(restored)
 
     horizontal_lines = raster_paths_xdir(poly, spacing, overrun=10)
     vertical_lines = raster_paths_ydir(poly, spacing, overrun=10)
@@ -370,7 +370,7 @@ def metric_to_mm_converter(value, metric): # converts metric to mm
 # G-CODE WRITER
 # =========================
 def write_gcode(filename, paths):
-    x_start, y_start, z_start = [125, 89, 0]
+    x_start, y_start, z_start = [80, 98, 0]
     #checks for specified servo(needle) height
     try:
         user_input_angle = servoDegreetb.get()
@@ -392,7 +392,7 @@ def write_gcode(filename, paths):
     try:
         zheight = heightEntry.get()
         if not zheight: # If the textbox is empty
-            z_start = 0
+            pass
         else:
             if int(zheight) >= 0 and int(zheight) <= 35:
                 z_start = int(zheight)
@@ -404,17 +404,19 @@ def write_gcode(filename, paths):
         z_start = 0
         logger.warning("Invalid or missing height, defaulting to 0.")
 
-    xnew = x_start + (z_start*math.tan(math.radians(BRUSH_ANGLE)))
+    # ~ xnew = x_start - (z_start*math.tan(math.radians(BRUSH_ANGLE)))
+    xnew = x_start
     
 
     with open(filename, "w") as f:
         f.write("G21\n")      # mm
         f.write("G90\n")      # absolute
         f.write("M211 S0\n")      # disables software endstops
-        f.write("G92 X0 Y0 Z0\n")  #remove once we get limit switches
+        f.write("G28 X Y\n")
+        f.write("G92 Z0\n")  #remove once we get limit switches
         #f.write("G1 Z1\n")    # moving z axes to ensure octoprint accepts gcode
         #f.write(f"G0 X{125+OVERRUN} Y{89-OVERRUN} Z11 F{FEEDRATE}\n")
-        f.write(f"G0 X{xnew:.2f} Y{y_start} Z{z_start} F{FEEDRATE}\n")
+        f.write(f"G0 X{xnew:.1f} Y{y_start} Z{z_start} F{FEEDRATE}\n")
         
         f.write(f"G92 X0 Y0 Z0\n") 
         #f.write(f"G0 X0 Y0\n") 
@@ -462,8 +464,9 @@ def write_gcode(filename, paths):
         # ===== Shutdown =====
         # f.write("G0 Z5\n")
         # Return to origin
-        f.write("G0 X0 Y0\n")
-        f.write(f"G0 X-{xnew:.2f} Y-{y_start} Z-{z_start}\n")
+        f.write("G28 X Y\n")
+        f.write(f"G1 Z-{z_start}\n")
+        #f.write(f"G0 X-{xnew:.1f} Y-{y_start} Z-{z_start}\n")
 
         logger.info(f"Gcode file is generated with servo angle:{servo_angle}")
 
@@ -746,7 +749,7 @@ def path_clicked(event): #executed when path from listbox is selected
         r = (x_1 - x_0) / 2
         original_poly = Point(c_x, c_y).buffer(r) #used for accurate coordinates in Candle
 
-    numofpasses=1
+    numofpasses=2
     original_paths = []
 
     # generates gcode depending on selected path
