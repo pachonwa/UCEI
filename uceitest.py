@@ -404,8 +404,8 @@ def write_gcode(filename, paths):
         z_start = 0
         logger.warning("Invalid or missing height, defaulting to 0.")
 
-    # ~ xnew = x_start - (z_start*math.tan(math.radians(BRUSH_ANGLE)))
-    xnew = x_start
+    # ~ xnew = x_start - (z_start*math.tan(math.radians(BRUSH_ANGLE)))  #dynamic homing with zheight
+    xnew = x_start    #comment out if you using line above ^
     
 
     with open(filename, "w") as f:
