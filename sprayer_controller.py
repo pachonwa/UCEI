@@ -481,22 +481,39 @@ def write_gcode(filename, paths):
         E=0 #needed for extrusion. octoprint is for 3d printers so if extrusion isn't mentioned, it thinks that nothing is happening
 
         for path in paths:    
+            print("path: ",path)
             if path == "DWELL":
                 f.write("M280 P0 S0\n") # Spray OFF
                 f.write("G0 X0 Y0\n") # 1. Park the nozzle at origin to avoid heat
                 f.write("G4 S5\n")    # 2. Dwell for 5 seconds
                 continue               # 3. Move to the next pass (45 degrees)    
             x0, y0 = path[0]
+            x_end, y_end = path[-1]
 
             f.write(f"G0 X{x0:.2f} Y{y0:.2f}\n")
 
             # Spray OFF
             f.write("M280 P0 S0\n")
             f.write("G4 P250\n")  #Dwell 250ms for servo to move
-            
-            for x, y in path:
+
+            step_size = 5.0 #5 mm
+            servo_clogging_angle = 3
+            dist = math.hypot(x_end - x0, y_end - y0)
+            num_segments = max(1, int(dist / step_size))
+
+            for i in range(1, num_segments+1):
                 E+=1
+                x = x0 + (x_end-x0) * (i/num_segments)
+                y = y0 + (y_end-y0) * (i/num_segments)
+
+                f.write(f"M280 P0 S{servo_angle + servo_clogging_angle}\n")
                 f.write(f"G1 X{x:.2f} Y{y:.2f} E{E} F{FEEDRATE}\n")
+
+                servo_clogging_angle *= -1
+            
+            # for x, y in path:
+            #     E+=1
+            #     f.write(f"G1 X{x:.2f} Y{y:.2f} E{E} F{FEEDRATE}\n")
 
             # Spray ON
             f.write(f"M280 P0 S{servo_angle}\n")
